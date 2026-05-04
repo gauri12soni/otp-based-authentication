@@ -18,7 +18,7 @@ public class AuthResponse {
     public static class AuthData {
         private String accessToken;
         private String refreshToken;
-        private Integer expiresIn;
+        private long expiresIn;
         private String tokenType;
         private UserResponse user;
         private Integer expiresIn_otp;

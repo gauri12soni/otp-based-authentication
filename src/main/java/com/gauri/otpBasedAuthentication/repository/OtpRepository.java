@@ -15,10 +15,6 @@ public interface OtpRepository extends JpaRepository<OtpCode, Long> {
 
     Optional<OtpCode> findTopByPhoneOrderByCreatedAtDesc(String phone);
 
-    @Modifying
-    @Transactional
-    @Query("UPDATE OtpCode o SET o.isUsed = true WHERE o.phone = :phone")
-    void markAllAsUsed(String phone);
 
     @Modifying
     @Transactional

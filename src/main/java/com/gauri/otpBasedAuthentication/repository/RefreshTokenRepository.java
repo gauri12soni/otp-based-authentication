@@ -19,19 +19,11 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, UUID
 
 
     Optional<RefreshToken> findByTokenHash(String tokenHash);
+    Optional<RefreshToken> findBySession(Session session);
 
-    @Modifying
-    @Transactional
     void deleteBySession(Session session);
 
-    @Modifying
-    @Transactional
-    @Query("UPDATE RefreshToken rt SET rt.isRevoked = true WHERE rt.session = :session")
-    void revokeAllSessionTokens(Session session);
 
-    @Modifying
-    @Transactional
-    void deleteByExpiresAtBefore(Instant now);
 
 }
 
