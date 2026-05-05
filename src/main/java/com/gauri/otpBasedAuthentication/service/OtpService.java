@@ -7,7 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.security.SecureRandom;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.Random;
 
@@ -28,7 +31,7 @@ public class OtpService {
     @Value("${otp.resend.window.minutes}")
     private int resendWindowMinutes;
 
-    private static final Random random = new Random();
+    private static final SecureRandom random = new SecureRandom();
 
     public String generateAndSendOtp(String phone, boolean isNewUser) {
         String otpCode = String.format("%06d", random.nextInt(1000000));
@@ -39,8 +42,8 @@ public class OtpService {
         otp.setOtpCode(otpCode);
         otp.setIsUsed(false);
         otp.setResendCount(0);
-        otp.setCreatedAt(LocalDateTime.now());
-        otp.setExpiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes));
+        otp.setCreatedAt(Instant.now());
+        otp.setExpiresAt(Instant.now().plus(otpExpirationMinutes, ChronoUnit.MINUTES));
 
         otpRepository.save(otp);
 
@@ -56,7 +59,7 @@ public class OtpService {
 
     public boolean verifyOtp(String phone, String otpCode) {
         Optional<OtpCode> otpOpt = otpRepository.findByPhoneAndOtpCodeAndIsUsedFalseAndExpiresAtAfter(
-                phone, otpCode, LocalDateTime.now()
+                phone, otpCode, Instant.now()
         );
 
         if (otpOpt.isEmpty()) {
@@ -72,7 +75,7 @@ public class OtpService {
 
     public String resendOtp(String phone) {
         // Check rate limit
-        LocalDateTime windowStart = LocalDateTime.now().minusMinutes(resendWindowMinutes);
+        Instant windowStart = Instant.now().minus(resendWindowMinutes, ChronoUnit.MINUTES);
         long resendCount = otpRepository.countByPhoneAndCreatedAtAfter(phone, windowStart);
 
         if (resendCount >= resendLimit) {
@@ -89,15 +92,15 @@ public class OtpService {
         OtpCode latestOtp = latestOtpOpt.get();
 
         // Check if not expired
-        if (latestOtp.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (latestOtp.getExpiresAt().isBefore(Instant.now())) {
             // Generate new OTP if expired
             return generateAndSendOtp(phone, false);
         }
 
         // Increment resend count and send same OTP
         latestOtp.setResendCount(latestOtp.getResendCount() + 1);
-        latestOtp.setCreatedAt(LocalDateTime.now());
-        latestOtp.setExpiresAt(LocalDateTime.now().plusMinutes(otpExpirationMinutes));
+        latestOtp.setCreatedAt(Instant.now());
+        latestOtp.setExpiresAt(Instant.now().plus(otpExpirationMinutes, ChronoUnit.MINUTES));
         otpRepository.save(latestOtp);
 
         boolean sent = smsService.sendOtp(phone, latestOtp.getOtpCode());

@@ -1,5 +1,6 @@
 package com.gauri.otpBasedAuthentication.security;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.gauri.otpBasedAuthentication.entity.Session;
 import com.gauri.otpBasedAuthentication.repository.SessionRepository;
 import com.gauri.otpBasedAuthentication.service.CustomUserDetailsService;
@@ -8,6 +9,7 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -15,8 +17,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 
 import java.io.IOException;
 import java.time.Instant;
@@ -24,26 +24,21 @@ import java.util.Map;
 import java.util.UUID;
 
 @Component
+@RequiredArgsConstructor
 public class JwtFilter extends OncePerRequestFilter {
 
-    @Autowired
-    private JwtUtil jwtUtil;
 
-    @Autowired
-    private SessionRepository sessionRepository;
+    private final JwtUtil jwtUtil;
+    private final SessionRepository sessionRepository;
+    private final CustomUserDetailsService userDetailsService;
 
-    @Autowired
-    private CustomUserDetailsService userDetailsService;
-
-    @Autowired
-    private ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain)
             throws ServletException, IOException {
-
 
         final String authHeader = request.getHeader("Authorization");
 
@@ -54,28 +49,25 @@ public class JwtFilter extends OncePerRequestFilter {
 
         try {
             String token = authHeader.substring(7);
-
             UUID sessionId = jwtUtil.extractSessionId(token);
+            String tokenPhone = jwtUtil.extractPhone(token);
 
-            String tokenUsername = jwtUtil.extractUsername(token);
-
-
-            //  Use findBySessionId
             Session session = sessionRepository.findById(sessionId)
                     .orElseThrow(() -> new RuntimeException("Session not found"));
-
 
             if (session.getExpiresAt().isBefore(Instant.now())) {
                 throw new RuntimeException("Session expired");
             }
 
-            // Validate username matches
-            if (!session.getUser().getPhone().equals(tokenUsername)) {
+            if (!session.getUser().getPhone().equals(tokenPhone)) {
                 throw new RuntimeException("User mismatch");
             }
 
 
-            // Store sessionId in request for logout endpoint
+            if (!session.getIpAddress().equals(request.getRemoteAddr()) ||
+                    !session.getUserAgent().equals(request.getHeader("User-Agent")))
+                throw new RuntimeException("Device mismatch");
+
             request.setAttribute("sessionId", sessionId.toString());
 
             if (session.getLastActiveAt().isBefore(Instant.now().minusSeconds(300))) {
@@ -83,13 +75,8 @@ public class JwtFilter extends OncePerRequestFilter {
                 sessionRepository.save(session);
             }
 
-            String username = session.getUser().getPhone();
-
-            // SET AUTHENTICATION
-            if (username != null &&
-                    SecurityContextHolder.getContext().getAuthentication() == null) {
-
-                var userDetails = userDetailsService.loadUserByUsername(username);
+            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                var userDetails = userDetailsService.loadUserByUsername(tokenPhone);
 
                 UsernamePasswordAuthenticationToken authToken =
                         new UsernamePasswordAuthenticationToken(
@@ -98,12 +85,10 @@ public class JwtFilter extends OncePerRequestFilter {
                                 userDetails.getAuthorities()
                         );
 
-                authToken.setDetails(
-                        new WebAuthenticationDetailsSource().buildDetails(request)
-                );
-
+                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
             }
+
 
         } catch (ExpiredJwtException e) {
             sendError(response, HttpStatus.UNAUTHORIZED, "Token expired");

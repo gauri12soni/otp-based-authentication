@@ -2,6 +2,8 @@ package com.gauri.otpBasedAuthentication.dto;
 
 import lombok.Builder;
 import lombok.Data;
+
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -14,7 +16,7 @@ public class UserResponse {
     private String email;
     private String role;
     private Boolean isActive;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime lastLoginAt;
+    private Instant createdAt;
+    private Instant updatedAt;
+    private Instant lastLoginAt;
 }

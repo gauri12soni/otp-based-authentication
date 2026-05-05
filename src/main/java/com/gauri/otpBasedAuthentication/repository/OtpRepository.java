@@ -6,19 +6,20 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
 
 public interface OtpRepository extends JpaRepository<OtpCode, Long> {
     Optional<OtpCode> findByPhoneAndOtpCodeAndIsUsedFalseAndExpiresAtAfter(
-            String phone, String otpCode, LocalDateTime now);
+            String phone, String otpCode, Instant now);
 
     Optional<OtpCode> findTopByPhoneOrderByCreatedAtDesc(String phone);
 
 
     @Modifying
     @Transactional
-    void deleteByExpiresAtBefore(LocalDateTime now);
+    void deleteByExpiresAtBefore(Instant now);
 
-    long countByPhoneAndCreatedAtAfter(String phone, LocalDateTime time);
+    long countByPhoneAndCreatedAtAfter(String phone, Instant time);
 }

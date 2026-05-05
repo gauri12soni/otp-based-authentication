@@ -4,24 +4,25 @@ import com.gauri.otpBasedAuthentication.dto.*;
 import com.gauri.otpBasedAuthentication.service.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/auth")
+@RequiredArgsConstructor
 public class AuthController {
 
     private final AuthService authService;
 
-    public AuthController(AuthService authService) {
-        this.authService = authService;
-    }
 
     @PostMapping("/send-otp")
     public ResponseEntity<?> sendOtp(@Valid @RequestBody SendOtpRequest request, HttpServletRequest httpRequest){
         try {
-            AuthResponse response = authService.sendOtp(request, httpRequest);
-            return ResponseEntity.ok(response);
+//            AuthResponse response = authService.sendOtp(request, httpRequest);
+            //testing
+            OtpTestResponse response1 = authService.sendOtp(request, httpRequest);
+            return ResponseEntity.ok(response1);
         }
         catch (Exception e){
            return ResponseEntity.badRequest().body(

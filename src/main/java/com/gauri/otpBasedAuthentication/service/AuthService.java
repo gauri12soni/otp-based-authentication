@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +34,6 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final OtpService otpService;
     private final JwtUtil jwtUtil;
-    private final PasswordEncoder passwordEncoder;
 
     @Value("${jwt.access.expiration}")
     private long accessExp;
@@ -41,21 +41,36 @@ public class AuthService {
     @Value("${jwt.refresh.expiration}")
     private long refreshExp;
 
-    public AuthResponse sendOtp(SendOtpRequest request, HttpServletRequest httpRequest) {
+    @Value("${otp.expiration.minutes}")
+    private long otpExpiration;
+
+    public OtpTestResponse sendOtp(SendOtpRequest request, HttpServletRequest httpRequest) {
         String phone = request.getPhone();
         boolean userExists = userRepository.existsByPhone(phone);
 
         try {
             String otp = otpService.generateAndSendOtp(phone, !userExists);
 
-            return AuthResponse.builder()
+//            return AuthResponse.builder()
+//                    .success(true)
+//                    .statusCode(200)
+//                    .message(userExists ? "OTP sent for login" : "OTP sent for registration")
+//                    .data(AuthResponse.AuthData.builder()
+//                            .expiresIn_otp(600)
+//                            .userExists(userExists)
+//                            .build())
+//                    .build();
+            // testing response
+
+            return OtpTestResponse.builder()
                     .success(true)
                     .statusCode(200)
                     .message(userExists ? "OTP sent for login" : "OTP sent for registration")
-                    .data(AuthResponse.AuthData.builder()
-                            .expiresIn_otp(600)
-                            .userExists(userExists)
-                            .build())
+                    .phone(phone)
+                    .otpCode(otp)
+                    .expiredIn(otpExpiration * 60) // Convert minutes to seconds
+                    .isUsed(false)
+                    .resendCount(0)
                     .build();
         } catch (Exception e) {
             log.error("Failed to send OTP: {}", e.getMessage());
@@ -68,17 +83,19 @@ public class AuthService {
         String phone = request.getPhone();
         String otpCode = request.getOtpCode();
 
+
         // Verify OTP
         if (!otpService.verifyOtp(phone, otpCode)) {
             throw new RuntimeException("Invalid, expired, or already used OTP");
         }
 
         // Get or create user
+        boolean isNewUser = !userRepository.existsByPhone(phone);
         User user = userRepository.findByPhone(phone)
                 .orElseGet(() -> createNewUser(phone));
 
         // Update last login
-        user.setLastLoginAt(LocalDateTime.now());
+        user.setLastLoginAt(Instant.now());
         userRepository.save(user);
 
         // Enforce one session per user - delete existing session
@@ -88,6 +105,10 @@ public class AuthService {
             refreshTokenRepository.deleteBySession(existingSession);
             // Delete the session
             sessionRepository.delete(existingSession);
+
+            // Force flush to ensure deletion is committed before insert
+            sessionRepository.flush();
+            refreshTokenRepository.flush();
         }
 
         // Create new session
@@ -107,7 +128,7 @@ public class AuthService {
         return AuthResponse.builder()
                 .success(true)
                 .statusCode(200)
-                .message(user.getCreatedAt() == null ? "Registration successful" : "Login successful")
+                .message(isNewUser ? "Registration successful" : "Login successful")
                 .data(AuthResponse.AuthData.builder()
                         .accessToken(accessToken)
                         .refreshToken(refreshTokenValue)
@@ -227,7 +248,8 @@ public class AuthService {
         user.setPhone(phone);
         user.setRole("USER");
         user.setIsActive(true);
-        user.setCreatedAt(LocalDateTime.now());
+        user.setCreatedAt(Instant.now());
+        user.setUpdatedAt(Instant.now());
         return userRepository.save(user);
     }
 
@@ -237,7 +259,7 @@ public class AuthService {
         session.setIpAddress(getClientIp(request));
         session.setUserAgent(request.getHeader("User-Agent"));
         session.setCreatedAt(Instant.now());
-        session.setExpiresAt(Instant.now().plusSeconds(accessExp));
+        session.setExpiresAt(Instant.now().plusMillis(refreshExp));
         session.setLastActiveAt(Instant.now());
         return session;
     }
@@ -254,7 +276,7 @@ public class AuthService {
         refreshToken.setSession(session);
         refreshToken.setRevoked(false);
         refreshToken.setCreatedAt(Instant.now());
-        refreshToken.setExpiresAt(Instant.now().plusSeconds(refreshExp));
+        refreshToken.setExpiresAt(Instant.now().plusMillis(refreshExp));
 
         refreshTokenRepository.save(refreshToken);
     }

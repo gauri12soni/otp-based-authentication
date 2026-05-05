@@ -1,5 +1,6 @@
 package com.gauri.otpBasedAuthentication.service;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
@@ -10,6 +11,7 @@ import java.util.Map;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class SmsService {
 
     @Value("${msg91.auth.key}")
@@ -23,9 +25,6 @@ public class SmsService {
 
     private final RestTemplate restTemplate;
 
-    public SmsService() {
-        this.restTemplate = new RestTemplate();
-    }
 
     public boolean sendOtp(String phone, String otp) {
         try {

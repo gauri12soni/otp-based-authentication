@@ -36,13 +36,13 @@ public class JwtUtil {
 
     }
 
-    public String extractUsername(String token) {
+    public String extractPhone(String token) {
 
         return getClaims(token).getSubject();
     }
-
     public UUID extractSessionId(String token) {
-        return getClaims(token).get("sessionId", UUID.class);
+        String sessionId = getClaims(token).get("sessionId", String.class);
+        return UUID.fromString(sessionId);
     }
 
     private Claims getClaims(String token) {

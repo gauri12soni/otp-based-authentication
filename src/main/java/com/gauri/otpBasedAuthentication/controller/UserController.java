@@ -9,6 +9,7 @@ import com.gauri.otpBasedAuthentication.repository.UserRepository;
 import com.gauri.otpBasedAuthentication.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -18,21 +19,33 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/user")
 @RequiredArgsConstructor
+@Slf4j
 public class UserController {
 
     private final UserRepository userRepository;
     private final UserService userService;
 
-
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile(Authentication authentication){
         try{
-            // Get phone from authentication
-            String phone = authentication.getName();
+            log.debug("getProfile called with authentication: {}", authentication);
 
-            // Find user by phone
+            if (authentication == null) {
+                log.error("Authentication is null");
+                throw new RuntimeException("Authentication required");
+            }
+
+            String phone = authentication.getName();
+            log.info("Getting profile for phone: {}", phone);
+
             User user = userRepository.findByPhone(phone)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
+                    .orElseThrow(() -> {
+                        log.error("User not found with phone: {}", phone);
+                        return new RuntimeException("User not found");
+                    });
+
+            log.debug("User found with ID: {}", user.getId());
+
             UserResponse userResponse = userService.getProfile(user.getId());
 
             return ResponseEntity.ok(
@@ -47,6 +60,7 @@ public class UserController {
             );
         }
         catch (Exception e){
+            log.error("Error getting profile: {}", e.getMessage(), e);
             return ResponseEntity.status(401).body(
                     ErrorResponse.builder()
                             .success(false)
@@ -63,8 +77,23 @@ public class UserController {
             @Valid @RequestBody UpdateProfileRequest request,
             Authentication authentication) {
         try {
-            UUID userId = UUID.fromString(authentication.getName());
-            UserResponse userResponse = userService.updateProfile(userId, request);
+            log.debug("updateProfile called with authentication: {}", authentication);
+
+            if (authentication == null) {
+                log.error("Authentication is null");
+                throw new RuntimeException("Authentication required");
+            }
+
+            String phone = authentication.getName();
+            log.info("Updating profile for phone: {}", phone);
+
+            User user = userRepository.findByPhone(phone)
+                    .orElseThrow(() -> {
+                        log.error("User not found with phone: {}", phone);
+                        return new RuntimeException("User not found");
+                    });
+
+            UserResponse userResponse = userService.updateProfile(user.getId(), request);
 
             return ResponseEntity.ok(
                     AuthResponse.builder()
@@ -77,6 +106,7 @@ public class UserController {
                             .build()
             );
         } catch (Exception e) {
+            log.error("Error updating profile: {}", e.getMessage(), e);
             if (e.getMessage().contains("email")) {
                 return ResponseEntity.badRequest().body(
                         ErrorResponse.builder()
@@ -98,4 +128,3 @@ public class UserController {
         }
     }
 }
-
