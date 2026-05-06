@@ -15,13 +15,13 @@ public class AuthResponse {
 
     @Data
     @Builder
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class AuthData {
         private String accessToken;
         private String refreshToken;
         private long expiresIn;
         private String tokenType;
         private UserResponse user;
-        private Integer expiresIn_otp;
         private Boolean userExists;
     }
 }

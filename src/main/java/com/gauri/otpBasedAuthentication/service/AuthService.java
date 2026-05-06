@@ -12,15 +12,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.UUID;
 
@@ -44,38 +41,46 @@ public class AuthService {
     @Value("${otp.expiration.minutes}")
     private long otpExpiration;
 
-    public OtpTestResponse sendOtp(SendOtpRequest request, HttpServletRequest httpRequest) {
+    public AuthResponse sendOtp(SendOtpRequest request, HttpServletRequest httpRequest) {
         String phone = request.getPhone();
         boolean userExists = userRepository.existsByPhone(phone);
 
         try {
-            String otp = otpService.generateAndSendOtp(phone, !userExists);
+            otpService.generateAndSendOtp(phone, !userExists);
 
-//            return AuthResponse.builder()
-//                    .success(true)
-//                    .statusCode(200)
-//                    .message(userExists ? "OTP sent for login" : "OTP sent for registration")
-//                    .data(AuthResponse.AuthData.builder()
-//                            .expiresIn_otp(600)
-//                            .userExists(userExists)
-//                            .build())
-//                    .build();
-            // testing response
-
-            return OtpTestResponse.builder()
+            return AuthResponse.builder()
                     .success(true)
                     .statusCode(200)
                     .message(userExists ? "OTP sent for login" : "OTP sent for registration")
-                    .phone(phone)
-                    .otpCode(otp)
-                    .expiredIn(otpExpiration * 60) // Convert minutes to seconds
-                    .isUsed(false)
-                    .resendCount(0)
+                    .data(AuthResponse.AuthData.builder()
+                            .expiresIn(otpExpiration * 60) // minutes to seconds
+                            .userExists(userExists)
+                            .build())
                     .build();
         } catch (Exception e) {
             log.error("Failed to send OTP: {}", e.getMessage());
             throw new RuntimeException("Failed to send OTP: " + e.getMessage());
         }
+
+        // for testing
+//        try {
+//            String otp = otpService.generateAndSendOtp(phone, !userExists);
+//
+//            return OtpTestResponse.builder()
+//                    .success(true)
+//                    .statusCode(200)
+//                    .message(userExists ? "OTP sent for login" : "OTP sent for registration")
+//                    .phone(phone)
+//                    .otpCode(otp)
+//                    .expiredIn(otpExpiration * 60) // Convert minutes to seconds
+//                    .isUsed(false)
+//                    .resendCount(0)
+//                    .build();
+//        } catch (Exception e) {
+//            log.error("Failed to send OTP: {}", e.getMessage());
+//            throw new RuntimeException("Failed to send OTP: " + e.getMessage());
+//        }
+
     }
 
     @Transactional
@@ -98,31 +103,22 @@ public class AuthService {
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
 
-        // Enforce one session per user - delete existing session
+        // One session per user - delete existing session
         Session existingSession = sessionRepository.findByUser(user).orElse(null);
         if (existingSession != null) {
-            // Delete associated refresh tokens
             refreshTokenRepository.deleteBySession(existingSession);
-            // Delete the session
             sessionRepository.delete(existingSession);
-
-            // Force flush to ensure deletion is committed before insert
             sessionRepository.flush();
             refreshTokenRepository.flush();
         }
 
-        // Create new session
         Session session = createSession(user, httpRequest);
         sessionRepository.save(session);
 
-        // Generate tokens
         String accessToken = jwtUtil.generateAccessToken(user.getPhone(), session.getId().toString(), accessExp);
         String refreshTokenValue = generateRefreshToken(session);
-
-        // Save refresh token
         saveRefreshToken(refreshTokenValue, session);
 
-        // Build response
         UserResponse userResponse = mapToUserResponse(user);
 
         return AuthResponse.builder()
@@ -132,7 +128,7 @@ public class AuthService {
                 .data(AuthResponse.AuthData.builder()
                         .accessToken(accessToken)
                         .refreshToken(refreshTokenValue)
-                        .expiresIn(accessExp)
+                        .expiresIn(accessExp / 1000) // ms  to seconds
                         .tokenType("Bearer")
                         .user(userResponse)
                         .build())
@@ -144,48 +140,41 @@ public class AuthService {
         boolean userExists = userRepository.existsByPhone(phone);
 
         try {
-            String otp = otpService.resendOtp(phone);
+            otpService.resendOtp(phone);
 
             return AuthResponse.builder()
                     .success(true)
                     .statusCode(200)
                     .message("New OTP sent")
                     .data(AuthResponse.AuthData.builder()
-                            .expiresIn_otp(600)
+                            .expiresIn(otpExpiration * 60)
                             .userExists(userExists)
                             .build())
                     .build();
         } catch (Exception e) {
             log.error("Failed to resend OTP: {}", e.getMessage());
-            throw new RuntimeException("Failed to resend OTP: " + e.getMessage());
+            throw new RuntimeException(e.getMessage());
         }
     }
 
     @Transactional
     public AuthResponse refreshToken(RefreshTokenRequest request, HttpServletRequest httpRequest) {
         String refreshTokenValue = request.getRefreshToken();
-
-        // Hash the token
         String tokenHash = hashToken(refreshTokenValue);
 
-        // Find token in DB
         RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(tokenHash)
                 .orElseThrow(() -> new RuntimeException("Invalid refresh token"));
 
-        // Check if revoked
         if (refreshToken.isRevoked()) {
             throw new RuntimeException("Token has been revoked");
         }
 
-        // Check expiry
         if (refreshToken.getExpiresAt().isBefore(Instant.now())) {
             throw new RuntimeException("Token has expired");
         }
 
-        // Get session
         Session session = refreshToken.getSession();
 
-        // Validate IP and User-Agent
         if (!session.getIpAddress().equals(getClientIp(httpRequest))) {
             throw new RuntimeException("IP address mismatch");
         }
@@ -194,11 +183,9 @@ public class AuthService {
             throw new RuntimeException("User-Agent mismatch");
         }
 
-        // Revoke old token
         refreshToken.setRevoked(true);
         refreshTokenRepository.save(refreshToken);
 
-        // Generate new tokens
         String newAccessToken = jwtUtil.generateAccessToken(
                 session.getUser().getPhone(),
                 session.getId().toString(),
@@ -206,8 +193,6 @@ public class AuthService {
         );
 
         String newRefreshTokenValue = generateRefreshToken(session);
-
-        // Save new refresh token
         saveRefreshToken(newRefreshTokenValue, session);
 
         return AuthResponse.builder()
@@ -217,7 +202,7 @@ public class AuthService {
                 .data(AuthResponse.AuthData.builder()
                         .accessToken(newAccessToken)
                         .refreshToken(newRefreshTokenValue)
-                        .expiresIn(accessExp)
+                        .expiresIn(accessExp / 1000)
                         .tokenType("Bearer")
                         .build())
                 .build();
@@ -231,9 +216,7 @@ public class AuthService {
             Session session = sessionRepository.findById(sessionUuid)
                     .orElseThrow(() -> new RuntimeException("Session not found"));
 
-            // Delete associated refresh tokens
             refreshTokenRepository.deleteBySession(session);
-            // Delete session
             sessionRepository.delete(session);
 
             log.info("User logged out successfully. Session ID: {}", sessionId);

@@ -15,6 +15,11 @@ public interface OtpRepository extends JpaRepository<OtpCode, Long> {
             String phone, String otpCode, Instant now);
 
     Optional<OtpCode> findTopByPhoneOrderByCreatedAtDesc(String phone);
+    long countByPhoneAndResendCountGreaterThanAndCreatedAtAfter(
+            String phone, int resendCount, Instant time);
+
+    // Add this method — used in resendOtp()
+    Optional<OtpCode> findTopByPhoneAndIsUsedFalseOrderByCreatedAtDesc(String phone);
 
 
     @Modifying

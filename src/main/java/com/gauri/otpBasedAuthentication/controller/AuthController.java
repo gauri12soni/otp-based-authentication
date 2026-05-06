@@ -19,10 +19,10 @@ public class AuthController {
     @PostMapping("/send-otp")
     public ResponseEntity<?> sendOtp(@Valid @RequestBody SendOtpRequest request, HttpServletRequest httpRequest){
         try {
-//            AuthResponse response = authService.sendOtp(request, httpRequest);
+            AuthResponse response = authService.sendOtp(request, httpRequest);
             //testing
-            OtpTestResponse response1 = authService.sendOtp(request, httpRequest);
-            return ResponseEntity.ok(response1);
+         //   OtpTestResponse response1 = authService.sendOtp(request, httpRequest);
+            return ResponseEntity.ok(response);
         }
         catch (Exception e){
            return ResponseEntity.badRequest().body(
