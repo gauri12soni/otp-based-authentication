@@ -34,3 +34,9 @@ build/
 
 # Application secrets
 src/main/resources/application.properties
+# Application secrets
+src/main/resources/application-test.properties
+# Application secrets
+src/main/resources/application-dev.properties
+# Application secrets
+src/main/resources/application-prod.properties

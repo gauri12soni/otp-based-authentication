@@ -24,10 +24,10 @@ public class JwtUtil {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
-    public String generateAccessToken(String phone, String sessionId, long expiry) {
+    public String generateAccessToken(String userId, String sessionId, long expiry) {
 
         return Jwts.builder()
-                .subject(phone)
+                .subject(userId)
                 .claim("sessionId", sessionId)
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expiry))
@@ -36,10 +36,11 @@ public class JwtUtil {
 
     }
 
-    public String extractPhone(String token) {
+    public String extractUserId(String token) {
 
         return getClaims(token).getSubject();
     }
+
     public UUID extractSessionId(String token) {
         String sessionId = getClaims(token).get("sessionId", String.class);
         return UUID.fromString(sessionId);

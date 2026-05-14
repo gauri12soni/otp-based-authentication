@@ -26,8 +26,9 @@ public class User {
     @Column(length = 100)
     private String email;
 
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private String role = "USER";
+    private Role role = Role.USER;
 
     @Column(name = "is_active", nullable = false)
     private Boolean isActive = true;
@@ -50,4 +51,10 @@ public class User {
         createdAt = Instant.now();
         updatedAt = Instant.now();
     }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = Instant.now();
+    }
+
 }

@@ -4,8 +4,6 @@ import com.gauri.otpBasedAuthentication.dto.AuthResponse;
 import com.gauri.otpBasedAuthentication.dto.ErrorResponse;
 import com.gauri.otpBasedAuthentication.dto.UpdateProfileRequest;
 import com.gauri.otpBasedAuthentication.dto.UserResponse;
-import com.gauri.otpBasedAuthentication.entity.User;
-import com.gauri.otpBasedAuthentication.repository.UserRepository;
 import com.gauri.otpBasedAuthentication.service.UserService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,31 +20,21 @@ import java.util.UUID;
 @Slf4j
 public class UserController {
 
-    private final UserRepository userRepository;
     private final UserService userService;
 
     @GetMapping("/profile")
     public ResponseEntity<?> getProfile(Authentication authentication){
         try{
-            log.debug("getProfile called with authentication: {}", authentication);
 
             if (authentication == null) {
-                log.error("Authentication is null");
                 throw new RuntimeException("Authentication required");
             }
 
             String phone = authentication.getName();
             log.info("Getting profile for phone: {}", phone);
 
-            User user = userRepository.findByPhone(phone)
-                    .orElseThrow(() -> {
-                        log.error("User not found with phone: {}", phone);
-                        return new RuntimeException("User not found");
-                    });
 
-            log.debug("User found with ID: {}", user.getId());
-
-            UserResponse userResponse = userService.getProfile(user.getId());
+            UserResponse userResponse = userService.getProfile(phone);
 
             return ResponseEntity.ok(
                     AuthResponse.builder()
@@ -77,23 +65,14 @@ public class UserController {
             @Valid @RequestBody UpdateProfileRequest request,
             Authentication authentication) {
         try {
-            log.debug("updateProfile called with authentication: {}", authentication);
-
             if (authentication == null) {
-                log.error("Authentication is null");
                 throw new RuntimeException("Authentication required");
             }
 
             String phone = authentication.getName();
             log.info("Updating profile for phone: {}", phone);
 
-            User user = userRepository.findByPhone(phone)
-                    .orElseThrow(() -> {
-                        log.error("User not found with phone: {}", phone);
-                        return new RuntimeException("User not found");
-                    });
-
-            UserResponse userResponse = userService.updateProfile(user.getId(), request);
+            UserResponse userResponse = userService.updateProfile(phone, request);
 
             return ResponseEntity.ok(
                     AuthResponse.builder()

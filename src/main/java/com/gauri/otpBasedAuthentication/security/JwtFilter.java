@@ -10,7 +10,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,7 +49,7 @@ public class JwtFilter extends OncePerRequestFilter {
         try {
             String token = authHeader.substring(7);
             UUID sessionId = jwtUtil.extractSessionId(token);
-            String tokenPhone = jwtUtil.extractPhone(token);
+            String tokenUserId = jwtUtil.extractUserId(token);
 
             Session session = sessionRepository.findById(sessionId)
                     .orElseThrow(() -> new RuntimeException("Session not found"));
@@ -59,7 +58,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 throw new RuntimeException("Session expired");
             }
 
-            if (!session.getUser().getPhone().equals(tokenPhone)) {
+            if (!session.getUser().getId().toString().equals(tokenUserId)) {
                 throw new RuntimeException("User mismatch");
             }
 
@@ -76,7 +75,7 @@ public class JwtFilter extends OncePerRequestFilter {
             }
 
             if (SecurityContextHolder.getContext().getAuthentication() == null) {
-                var userDetails = userDetailsService.loadUserByUsername(tokenPhone);
+                var userDetails = userDetailsService.loadUserByUserId(tokenUserId);
 
                 UsernamePasswordAuthenticationToken authToken =
                         new UsernamePasswordAuthenticationToken(

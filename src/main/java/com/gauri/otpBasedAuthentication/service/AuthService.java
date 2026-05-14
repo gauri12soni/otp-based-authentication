@@ -12,8 +12,11 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -41,6 +44,8 @@ public class AuthService {
     @Value("${otp.expiration.minutes}")
     private long otpExpiration;
 
+    private final TransactionTemplate transactionTemplate;
+
     public AuthResponse sendOtp(SendOtpRequest request, HttpServletRequest httpRequest) {
         String phone = request.getPhone();
         boolean userExists = userRepository.existsByPhone(phone);
@@ -62,25 +67,6 @@ public class AuthService {
             throw new RuntimeException("Failed to send OTP: " + e.getMessage());
         }
 
-        // for testing
-//        try {
-//            String otp = otpService.generateAndSendOtp(phone, !userExists);
-//
-//            return OtpTestResponse.builder()
-//                    .success(true)
-//                    .statusCode(200)
-//                    .message(userExists ? "OTP sent for login" : "OTP sent for registration")
-//                    .phone(phone)
-//                    .otpCode(otp)
-//                    .expiredIn(otpExpiration * 60) // Convert minutes to seconds
-//                    .isUsed(false)
-//                    .resendCount(0)
-//                    .build();
-//        } catch (Exception e) {
-//            log.error("Failed to send OTP: {}", e.getMessage());
-//            throw new RuntimeException("Failed to send OTP: " + e.getMessage());
-//        }
-
     }
 
     @Transactional
@@ -93,6 +79,9 @@ public class AuthService {
         if (!otpService.verifyOtp(phone, otpCode)) {
             throw new RuntimeException("Invalid, expired, or already used OTP");
         }
+
+        // Invalidate ALL unused OTPs for this phone
+        otpService.invalidateUnusedOtps(phone);
 
         // Get or create user
         boolean isNewUser = !userRepository.existsByPhone(phone);
@@ -115,7 +104,7 @@ public class AuthService {
         Session session = createSession(user, httpRequest);
         sessionRepository.save(session);
 
-        String accessToken = jwtUtil.generateAccessToken(user.getPhone(), session.getId().toString(), accessExp);
+        String accessToken = jwtUtil.generateAccessToken(user.getId().toString(), session.getId().toString(), accessExp);
         String refreshTokenValue = generateRefreshToken(session);
         saveRefreshToken(refreshTokenValue, session);
 
@@ -157,57 +146,110 @@ public class AuthService {
         }
     }
 
-    @Transactional
+    // NEW REFRESH TOKEN LOGIC
     public AuthResponse refreshToken(RefreshTokenRequest request, HttpServletRequest httpRequest) {
         String refreshTokenValue = request.getRefreshToken();
         String tokenHash = hashToken(refreshTokenValue);
+        String currentIp = getClientIp(httpRequest);
+        String currentUserAgent = httpRequest.getHeader("User-Agent");
 
-        RefreshToken refreshToken = refreshTokenRepository.findByTokenHash(tokenHash)
-                .orElseThrow(() -> new RuntimeException("Invalid refresh token"));
+        // Find token
+        RefreshToken storedToken = refreshTokenRepository.findByTokenHash(tokenHash)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid token"));
 
-        if (refreshToken.isRevoked()) {
-            throw new RuntimeException("Token has been revoked");
+        Session session = storedToken.getSession();
+        String phone = session.getUser().getPhone();
+
+        // Check revoked
+        if (storedToken.isRevoked()) {
+            log.warn("Refresh token revoked for user: {} - Deleting session", phone);
+            // commit first, then throw
+            transactionTemplate.executeWithoutResult(status -> {
+                refreshTokenRepository.deleteBySession(session);
+                sessionRepository.delete(session);
+            });
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token revoked - login again");
         }
 
-        if (refreshToken.getExpiresAt().isBefore(Instant.now())) {
-            throw new RuntimeException("Token has expired");
+        // Check token expiry
+        if (storedToken.getExpiresAt().isBefore(Instant.now())) {
+            log.warn("Refresh token expired for user: {} - Deleting token", phone);
+            transactionTemplate.executeWithoutResult(status -> {
+                refreshTokenRepository.delete(storedToken);
+            });
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Token expired - login again");
         }
 
-        Session session = refreshToken.getSession();
-
-        if (!session.getIpAddress().equals(getClientIp(httpRequest))) {
-            throw new RuntimeException("IP address mismatch");
+        // Check session expiry
+        if (session.getExpiresAt().isBefore(Instant.now())) {
+            log.warn("Session expired for user: {} - Deleting session", phone);
+            transactionTemplate.executeWithoutResult(status -> {
+                refreshTokenRepository.deleteBySession(session);
+                sessionRepository.delete(session);
+            });
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Session expired - login again");
         }
 
-        if (!session.getUserAgent().equals(httpRequest.getHeader("User-Agent"))) {
-            throw new RuntimeException("User-Agent mismatch");
+        // Check IP
+        if (!session.getIpAddress().equals(currentIp)) {
+            log.warn("IP mismatch for user: {} - Expected: {}, Got: {} - Deleting session", phone, session.getIpAddress(), currentIp);
+            transactionTemplate.executeWithoutResult(status -> {
+                refreshTokenRepository.deleteBySession(session);
+                sessionRepository.delete(session);
+            });
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "IP changed - login again");
         }
 
-        refreshToken.setRevoked(true);
-        refreshTokenRepository.save(refreshToken);
+        // Check User-Agent
+        if (!session.getUserAgent().equals(currentUserAgent)) {
+            log.warn("User-Agent mismatch for user: {} - Deleting session", phone);
+            transactionTemplate.executeWithoutResult(status -> {
+                refreshTokenRepository.deleteBySession(session);
+                sessionRepository.delete(session);
+            });
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User-Agent changed - login again");
+        }
 
-        String newAccessToken = jwtUtil.generateAccessToken(
-                session.getUser().getPhone(),
-                session.getId().toString(),
-                accessExp
-        );
+        // Token rotation and success
+        return transactionTemplate.execute(status -> {
+            // Revoke old token
+            storedToken.setRevoked(true);
+            refreshTokenRepository.save(storedToken);
 
-        String newRefreshTokenValue = generateRefreshToken(session);
-        saveRefreshToken(newRefreshTokenValue, session);
+            // Create new refresh token
+            String newRefreshTokenValue = generateRefreshToken(session);
+            RefreshToken newToken = new RefreshToken();
+            newToken.setTokenHash(hashToken(newRefreshTokenValue));
+            newToken.setSession(session);
+            newToken.setRevoked(false);
+            newToken.setCreatedAt(Instant.now());
+            newToken.setExpiresAt(Instant.now().plusMillis(refreshExp));
+            refreshTokenRepository.save(newToken);
 
-        return AuthResponse.builder()
-                .success(true)
-                .statusCode(200)
-                .message("Token refreshed successfully")
-                .data(AuthResponse.AuthData.builder()
-                        .accessToken(newAccessToken)
-                        .refreshToken(newRefreshTokenValue)
-                        .expiresIn(accessExp / 1000)
-                        .tokenType("Bearer")
-                        .build())
-                .build();
+            // Update session
+            session.setExpiresAt(Instant.now().plusMillis(refreshExp));
+            session.setLastActiveAt(Instant.now());
+            sessionRepository.save(session);
+
+            // Generate new access token
+            String newAccessToken = jwtUtil.generateAccessToken(session.getUser().getId().toString(), session.getId().toString(), accessExp);
+
+            log.info("Token refreshed successfully for user: {}", phone);
+
+            return AuthResponse.builder()
+                    .success(true)
+                    .statusCode(200)
+                    .message("Token refreshed successfully")
+                    .data(AuthResponse.AuthData.builder()
+                            .accessToken(newAccessToken)
+                            .refreshToken(newRefreshTokenValue)
+                            .expiresIn(accessExp / 1000)
+                            .tokenType("Bearer")
+                            .user(mapToUserResponse(session.getUser()))
+                            .build())
+                    .build();
+        });
     }
-
 
     @Transactional
     public void logout(String sessionId) {
@@ -229,10 +271,7 @@ public class AuthService {
     private User createNewUser(String phone) {
         User user = new User();
         user.setPhone(phone);
-        user.setRole("USER");
-        user.setIsActive(true);
-        user.setCreatedAt(Instant.now());
-        user.setUpdatedAt(Instant.now());
+        user.setRole(User.Role.USER);
         return userRepository.save(user);
     }
 
@@ -288,7 +327,7 @@ public class AuthService {
                 .phone(user.getPhone())
                 .fullName(user.getFullName())
                 .email(user.getEmail())
-                .role(user.getRole())
+                .role(user.getRole().name())
                 .isActive(user.getIsActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())

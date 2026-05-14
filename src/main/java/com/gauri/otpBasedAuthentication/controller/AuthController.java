@@ -20,8 +20,6 @@ public class AuthController {
     public ResponseEntity<?> sendOtp(@Valid @RequestBody SendOtpRequest request, HttpServletRequest httpRequest){
         try {
             AuthResponse response = authService.sendOtp(request, httpRequest);
-            //testing
-         //   OtpTestResponse response1 = authService.sendOtp(request, httpRequest);
             return ResponseEntity.ok(response);
         }
         catch (Exception e){
@@ -47,7 +45,7 @@ public class AuthController {
                     ErrorResponse.builder()
                             .success(false)
                             .statusCode(400)
-                            .error("Invalid_OTP")
+                            .error("INVALID_OTP")
                             .message(e.getMessage())
                             .build()
             );

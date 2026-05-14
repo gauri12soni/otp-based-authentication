@@ -8,38 +8,31 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.UUID;
-
 @Service
 @RequiredArgsConstructor
 public class UserService {
 
     private final UserRepository userRepository;
 
-    public UserResponse getProfile(UUID userId) {
-        User user = userRepository.findById(userId)
+    public UserResponse getProfile(String phone) {
+        User user = userRepository.findByPhone(phone)
                 .orElseThrow(() -> new RuntimeException("User not found"));
-
         return mapToUserResponse(user);
     }
 
     @Transactional
-    public UserResponse updateProfile(UUID userId, UpdateProfileRequest request) {
-        User user = userRepository.findById(userId)
+    public UserResponse updateProfile(String phone, UpdateProfileRequest request) {
+        User user = userRepository.findByPhone(phone)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         if (request.getFullName() != null) {
             user.setFullName(request.getFullName());
         }
-
         if (request.getEmail() != null) {
             user.setEmail(request.getEmail());
         }
 
-        user.setUpdatedAt(Instant.now());
         userRepository.save(user);
-
         return mapToUserResponse(user);
     }
 
@@ -49,7 +42,7 @@ public class UserService {
                 .phone(user.getPhone())
                 .fullName(user.getFullName())
                 .email(user.getEmail())
-                .role(user.getRole())
+                .role(user.getRole().name())
                 .isActive(user.getIsActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
